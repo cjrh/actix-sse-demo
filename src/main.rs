@@ -1,5 +1,7 @@
+use actix_web::rt::{spawn, time};
 use actix_web::{get, middleware::Logger, post, web, App, HttpResponse, HttpServer, Responder};
-use actix_web::rt::{time, spawn};
+use tokio::sync::mpsc;
+use tokio_stream::{wrappers::ReceiverStream, StreamExt};
 
 #[get("/")]
 async fn hello() -> impl Responder {
@@ -33,28 +35,27 @@ async fn main() -> std::io::Result<()> {
 }
 
 use actix_web_lab::sse;
+use std::thread::sleep;
 use std::{convert::Infallible, time::Duration};
+use tokio::task::spawn_blocking;
 
 #[get("/from-channel")]
 async fn from_channel() -> impl Responder {
     println!("from_channel");
-    let (sender, sse_stream) = sse::channel(10);
 
-
+    // my producer
+    let (sender, receiver) = mpsc::channel(10);
     spawn(async move {
         for i in 1..=10 {
-            let _ = sender.send(sse::Data::new(i.to_string())).await;
-            sender.send(sse::Event::Comment("my comment".into())).await;
+            let _ = sender.send(i.to_string()).await;
             time::sleep(Duration::from_secs(1)).await;
         }
     });
-    // note: sender will typically be spawned or handed off somewhere else
-    // let _ = sender.send(sse::Event::Comment("my comment".into())).await;
-    // let _ = sender
-    //     .send(sse::Data::new("my data").event("chat_msg"))
-    //     .await;
 
-    sse_stream.with_retry_duration(Duration::from_secs(5))
+    sse::Sse::from_stream(
+        ReceiverStream::new(receiver)
+            .map(|string| Ok::<_, Infallible>(sse::Event::Data(sse::Data::new(string)))),
+    )
 }
 
 #[get("/from-stream")]

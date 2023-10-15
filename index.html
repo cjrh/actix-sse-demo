@@ -22,9 +22,9 @@ Received events:
         newElement.textContent = `message: ${event.data}`;
         eventList.appendChild(newElement);
         counter++;
-        // if (counter === 10) {
-        //     evtSource.close();
-        // }
+        if (counter === 100) {
+            evtSource.close();
+        }
     };
     evtSource.onerror = (event) => {
         console.log(`EventSource failed: ${event}`, event);

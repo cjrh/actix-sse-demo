@@ -1,4 +1,4 @@
-use actix_web::rt::{spawn, time};
+use actix_web::rt::{spawn};
 use actix_web::{get, middleware::Logger, post, web, App, HttpResponse, HttpServer, Responder};
 use tokio::sync::mpsc;
 use tokio_stream::{wrappers::ReceiverStream, StreamExt};
@@ -35,9 +35,42 @@ async fn main() -> std::io::Result<()> {
 }
 
 use actix_web_lab::sse;
+use futures_util::Stream;
+use serde::{Deserialize, Serialize};
+use serde_derive::{Deserialize, Serialize};
+use serde_json::json;
+use std::io::Read;
 use std::thread::sleep;
 use std::{convert::Infallible, time::Duration};
 use tokio::task::spawn_blocking;
+
+#[derive(Serialize, Deserialize)]
+struct Payload {
+    #[serde(with = "time::serde::rfc3339")]
+    timestamp: time::OffsetDateTime,
+    data: String,
+}
+
+impl Payload {
+    fn new(data: String) -> Self {
+        Self {
+            // Use the `time` create to get the current timestamp.
+            timestamp: time::OffsetDateTime::now_utc(),
+            data,
+        }
+    }
+}
+
+struct MySse();
+
+impl MySse {
+    fn from_receiver(receiver: mpsc::Receiver<impl Serialize + 'static>) -> impl Responder {
+        sse::Sse::from_stream(ReceiverStream::new(receiver).map(|item| {
+            let string = json!(&item).to_string();
+            Ok::<_, Infallible>(sse::Event::Data(sse::Data::new(string)))
+        }))
+    }
+}
 
 #[get("/from-channel")]
 async fn from_channel() -> impl Responder {
@@ -47,15 +80,13 @@ async fn from_channel() -> impl Responder {
     let (sender, receiver) = mpsc::channel(10);
     spawn(async move {
         for i in 1..=10 {
-            let _ = sender.send(i.to_string()).await;
-            time::sleep(Duration::from_secs(1)).await;
+            let payload = Payload::new(i.to_string());
+            let _ = sender.send(payload).await;
+            actix_web::rt::time::sleep(Duration::from_secs(1)).await;
         }
     });
 
-    sse::Sse::from_stream(
-        ReceiverStream::new(receiver)
-            .map(|string| Ok::<_, Infallible>(sse::Event::Data(sse::Data::new(string)))),
-    )
+    MySse::from_receiver(receiver)
 }
 
 #[get("/from-stream")]
